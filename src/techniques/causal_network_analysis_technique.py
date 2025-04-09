@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional
 from .analytical_technique import AnalyticalTechnique
 from utils.llm_integration import call_llm, extract_content, parse_json_response, MODEL_CONFIG
 
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
         logger.info(f"Executing CausalNetworkAnalysisTechnique for question: {context.question[:50]}...")
         
         # Get parameters or use defaults
-        max_entities = parameters.get("max_entities", 10)
+        #max_entities = parameters.get("max_entities", 10)
         include_feedback_loops = parameters.get("include_feedback_loops", True)
         
         # Step 1: Extract entities and concepts
@@ -46,7 +47,12 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
         
         # Step 2: Identify causal relationships
         relationships = self._identify_relationships(context.question, entities)
-        
+
+        # Fetch Economic Data and Geopolitical Data
+        economic_data = self._fetch_economic_data(context.question)
+        geopolitical_data = self._fetch_geopolitical_data(context.question)
+
+        relationships = self._identify_relationships(context.question, entities, economic_data, geopolitical_data)
         # Step 3: Build and analyze causal network
         network_analysis = self._analyze_network(relationships, include_feedback_loops)
         
@@ -54,7 +60,7 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
         interventions = self._identify_interventions(network_analysis)
         
         # Step 5: Generate final synthesis
-        synthesis = self._generate_synthesis(context.question, entities, relationships, network_analysis, interventions)
+        synthesis = self._generate_synthesis(context.question, entities, relationships, network_analysis, interventions, economic_data, geopolitical_data)
         
         return {
             "technique": "Causal Network Analysis",
@@ -240,7 +246,7 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
             }
         ]
     
-    def _identify_relationships(self, question, entities):
+    def _identify_relationships(self, question, entities, economic_data=None, geopolitical_data=None):
         """
         Identify causal relationships between entities.
         
@@ -269,12 +275,25 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
         entity_names = [entity.get("name", f"Entity {i+1}") for i, entity in enumerate(entities)]
         
         prompt = f"""
-        Identify the causal relationships between the following entities related to the question:
+        Identify the causal relationships between the following entities related to the question: 
         
         Question: "{question}"
         
         Entities:
         {json.dumps(entities, indent=2)}
+
+        """
+        if economic_data:
+            prompt += f"""
+            Relevant Economic Data:
+            {json.dumps(economic_data, indent=2)}
+            """
+
+        if geopolitical_data:
+            prompt += f"""
+            Relevant Geopolitical Data:
+            {json.dumps(geopolitical_data, indent=2)}
+            """
         
         For each relationship:
         1. Identify the source entity (cause)
@@ -551,7 +570,7 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
         
         return unique_interventions
     
-    def _generate_synthesis(self, question, entities, relationships, network_analysis, interventions):
+    def _generate_synthesis(self, question, entities, relationships, network_analysis, interventions, economic_data=None, geopolitical_data=None):
         """
         Generate a synthesis of the causal network analysis.
         
@@ -566,6 +585,8 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
             Dictionary containing the synthesis
         """
         logger.info("Generating synthesis of causal network analysis...")
+
+
         
         prompt = f"""
         Synthesize the following causal network analysis for the question:
@@ -586,7 +607,19 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
         Potential Intervention Points:
         {json.dumps(interventions, indent=2)}
         
-        Based on this causal network analysis:
+        """
+        if economic_data:
+            prompt += f"""
+            Relevant Economic Data:
+            {json.dumps(economic_data, indent=2)}
+            """
+
+        if geopolitical_data:
+            prompt += f"""
+            Relevant Geopolitical Data:
+            {json.dumps(geopolitical_data, indent=2)}
+            """
+        prompt += f"""        Based on this causal network analysis:
         1. What are the key drivers in this system?
         2. What are the most important causal pathways?
         3. What feedback dynamics are present?
@@ -642,3 +675,52 @@ class CausalNetworkAnalysisTechnique(AnalyticalTechnique):
                 "confidence_level": "Low",
                 "potential_biases": ["Technical error bias"]
             }
+
+    def _fetch_economic_data(self, question):
+        """
+        Fetch relevant economic data based on the question.
+
+        Args:
+            question: The analytical question
+
+        Returns:
+            A dictionary containing relevant economic data or None if data fetching fails.
+        """
+        logger.info("Fetching economic data...")
+        try:
+            economics_mcp = self.mcp_registry.get_mcp("economics_mcp")
+            if economics_mcp:
+                # Determine relevant indicators based on the question
+                if "inflation" in question.lower():
+                    indicators = ["CPIAUCSL", "FPCPITOTLZGUSA"]  # CPI, Inflation
+                elif "unemployment" in question.lower():
+                    indicators = ["UNRATE"]  # Unemployment Rate
+                elif "gdp" in question.lower():
+                    indicators = ["GDP"]
+                else:
+                    indicators = ["CPIAUCSL", "UNRATE", "GDP"]
+
+                # Fetch data for each indicator
+                economic_data = {}
+                for indicator in indicators:
+                    series = economics_mcp.get_fred_data(indicator, "2020-01-01", "2023-12-31")
+                    economic_data[indicator] = series
+                return economic_data
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching economic data: {e}")
+            return None
+
+    def _fetch_geopolitical_data(self, question):
+        """
+        Fetch relevant geopolitical event data based on the question.
+        """
+        try:
+            geopolitics_mcp = self.mcp_registry.get_mcp("geopolitics_mcp")
+            if geopolitics_mcp:
+                # Fetch data for the relevant location and date range
+                return geopolitics_mcp.get_gdelt_data(location="Global", start_date="20230101", end_date="20231231")
+        except Exception as e:
+            logger.error(f"Error fetching geopolitical data: {e}")
+            return None

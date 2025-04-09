@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional
 
 from src.analytical_technique import AnalyticalTechnique
 from src.analysis_context import AnalysisContext
+from utils.mcp_utils import get_relevant_data_from_mcps
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -70,7 +71,10 @@ class ScenarioTriangulationTechnique(AnalyticalTechnique):
             # Generate scenarios
             scenarios = self._generate_scenarios(question, uncertainties, research_results, parameters)
             
-            # Analyze scenario implications
+            # Get data from MCPs
+            relevant_data = get_relevant_data_from_mcps(self.mcp_registry, question, ["EconomicsMCP", "GeopoliticsMCP"])
+
+             # Analyze scenario implications
             implications = self._analyze_scenario_implications(question, scenarios, research_results, parameters)
             
             # Identify common elements
@@ -331,6 +335,12 @@ class ScenarioTriangulationTechnique(AnalyticalTechnique):
             
             Make the scenarios diverse and cover different combinations of uncertainty outcomes.
             """
+             # Include relevant data in prompt
+            if relevant_data:
+                prompt += "\n\nRelevant Economic and Geopolitical Data:\n"
+                for data_source, data_items in relevant_data.items():
+                    prompt += f"{data_source}:\n" + "\n".join(data_items) + "\n\n"
+
             
             # Call Llama4ScoutMCP
             llama_response = llama4_scout.process({
@@ -553,6 +563,13 @@ class ScenarioTriangulationTechnique(AnalyticalTechnique):
                 
                 Provide specific, actionable insights for each category.
                 """
+                # Include relevant data in prompt
+                if relevant_data:
+                    prompt += "\n\nRelevant Economic and Geopolitical Data:\n"
+                    for data_source, data_items in relevant_data.items():
+                        prompt += f"{data_source}:\n" + "\n".join(data_items) + "\n\n"
+
+
                 
                 # Call Llama4ScoutMCP
                 llama_response = llama4_scout.process({
@@ -848,6 +865,12 @@ class ScenarioTriangulationTechnique(AnalyticalTechnique):
             
             Focus on strategies that provide value in multiple scenarios and help manage key uncertainties.
             """
+            # Include relevant data in prompt
+            if relevant_data:
+                prompt += "\n\nRelevant Economic and Geopolitical Data:\n"
+                for data_source, data_items in relevant_data.items():
+                    prompt += f"{data_source}:\n" + "\n".join(data_items) + "\n\n"
+
             
             # Call Llama4ScoutMCP
             llama_response = llama4_scout.process({

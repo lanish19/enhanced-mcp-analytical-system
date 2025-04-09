@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 """
-Research MCP for conducting web searches and content extraction.
-This module provides the ResearchMCP class with real search capabilities.
+Research MCP implementation.
+This module provides the ResearchMCP class for conducting research.
 """
 
 import logging
@@ -8,53 +9,90 @@ import json
 import time
 import os
 import hashlib
-import requests
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
+from data.domain_mcp import DomainMCP
 from bs4 import BeautifulSoup
 import trafilatura
 import urllib.parse
 import re
 
+from utils.llm_integration import call_llm, extract_content, parse_json_response, MODEL_CONFIG
 from src.base_mcp import BaseMCP
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class ResearchMCP(BaseMCP):
+class ResearchMCP(DomainMCP):
     """
-    Research MCP for conducting web searches and content extraction.
-    
+    Research MCP for conducting research.
+
     This MCP provides capabilities for:
-    1. Conducting web searches using Brave Search API
-    2. Conducting academic searches using Semantic Scholar or Google Scholar
-    3. Extracting content from web pages
-    4. Analyzing search results
+    1. Conducting web searches
+    2. Extracting content from web pages
     """
     
     def __init__(self, config=None):
-        """
-        Initialize the Research MCP.
+        
+        
+        super().__init__(name="research_mcp")
+        
+        logger.info(f"Initialized ResearchMCP")
+
+    def get_research(self, query: str) -> Dict[str, Any]:
+        Conduct a research based on the provided query
         
         Args:
-            config: Optional configuration dictionary with API keys
+            query (str): The search query string.
+        
+        Returns:
+            Dict[str, Any]: A dictionary containing a list of research findings.
+                Example:
+                {
+                    "research_results": [
+                        "Research finding 1",
+                        "Research finding 2",
+                        "Research finding 3"
+                    ]
+                }
         """
-        super().__init__(name="research_mcp", config=config)
-        
-        # Configuration
-        self.brave_api_key = config.get("brave_api_key") if config else os.environ.get("BRAVE_API_KEY")
-        self.brave_api_base = config.get("brave_api_base", "https://api.search.brave.com/res/v1/web/search")
-        self.semantic_scholar_api_base = config.get("semantic_scholar_api_base", "https://api.semanticscholar.org/graph/v1")
-        self.max_retries = config.get("max_retries", 3) if config else 3
-        self.retry_delay = config.get("retry_delay", 2) if config else 2
-        self.cache_enabled = config.get("cache_enabled", True) if config else True
-        
-        # Cache for search results and content extraction
-        self.search_cache = {}
-        self.content_cache = {}
-        
-        logger.info(f"Initialized ResearchMCP with cache enabled: {self.cache_enabled}")
-    
+        logger.info(f"Conducting research for query: {query}")
+
+        prompt = f"""
+            Provide a list of concise and relevant research findings related to the following topic: {query}. 
+            Each finding should be a single sentence.
+            
+            Return a JSON object with a single key named `research_results`, whose value is a list of strings, where each string is a research finding.
+            Example:
+            {{
+                "research_results": [
+                    "Research finding 1",
+                    "Research finding 2",
+                    "Research finding 3"
+                ]
+            }}
+        """
+
+        model_config = MODEL_CONFIG["llama4"]
+        model_config["temperature"] = 0.7
+
+        try:
+            response = call_llm(prompt, model_config)
+            content = extract_content(response)
+            parsed_response = parse_json_response(content)
+
+            if parsed_response.get("fallback_generated"):
+                logger.error(f"Error in LLM research call: {parsed_response.get('error')}")
+                return {"research_results": []}
+            
+            research_results = parsed_response.get("research_results", [])
+        except Exception as e:
+            logger.error(f"Error during LLM research call: {e}")
+            return {"research_results": []}
+
+        return {"research_results": research_results}
+
+
     def process(self, context: Dict) -> Dict:
         """
         Process a research request.

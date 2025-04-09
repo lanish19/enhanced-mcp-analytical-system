@@ -29,13 +29,35 @@ class ACHTechnique(AnalyticalTechnique):
     
     def __init__(self):
         """Initialize the Analysis of Competing Hypotheses Technique."""
+        
         super().__init__(
             name="analysis_of_competing_hypotheses",
             description="Systematically evaluates multiple competing hypotheses against evidence",
-            required_mcps=["llama4_scout", "research_mcp", "perplexity_sonar"],
+            required_mcps=["llama4_scout", "research_mcp", "perplexity_sonar", "economics_mcp", "geopolitics_mcp"],
             compatible_techniques=["key_assumptions_check", "multi_persona", "red_teaming"],
             incompatible_techniques=[]
         )
+
+
+        # Ensure all required MCPs are initialized and available
+        required_mcps = ["llama4_scout", "research_mcp", "perplexity_sonar", "economics_mcp", "geopolitics_mcp"]
+        for mcp_name in required_mcps:
+            if mcp_name not in self.mcp_registry:
+                raise ValueError(f"{mcp_name} must be initialized and available in the mcp_registry")
+
+        # Ensure research_mcp is initialized and available
+        # if "research_mcp" not in self.mcp_registry:
+        #     raise ValueError("research_mcp must be initialized and available in the mcp_registry")
+        #
+        # if "llama4_scout" not in self.mcp_registry:
+        #     raise ValueError("llama4_scout must be initialized and available in the mcp_registry")
+        # if "perplexity_sonar" not in self.mcp_registry:
+        #     raise ValueError("perplexity_sonar must be initialized and available in the mcp_registry")
+        # if "economics_mcp" not in self.mcp_registry:
+        #     raise ValueError("economics_mcp must be initialized and available in the mcp_registry")
+        # if "geopolitics_mcp" not in self.mcp_registry:
+        #     raise ValueError("geopolitics_mcp must be initialized and available in the mcp_registry")
+
         logger.info("Initialized ACHTechnique")
     
     def execute(self, context: AnalysisContext, parameters: Dict = None) -> Dict:
@@ -66,6 +88,14 @@ class ACHTechnique(AnalyticalTechnique):
             # Get research results from context
             research_results = context.get("research_results", {})
             
+            # Fetch economic and geopolitical data
+            relevant_economic_data = self._fetch_relevant_economic_data(question, context)
+
+            # Gather evidence, including research findings
+            self._gather_evidence(question, context)
+            relevant_geopolitical_data = self._fetch_relevant_geopolitical_data(question, context)
+
+            
             # Generate hypotheses
             hypotheses = self._generate_hypotheses(question, research_results, context, parameters)
             
@@ -73,7 +103,7 @@ class ACHTechnique(AnalyticalTechnique):
             evidence = self._identify_evidence(question, hypotheses, research_results, context, parameters)
             
             # Evaluate hypotheses against evidence
-            evaluation_matrix = self._evaluate_hypotheses(hypotheses, evidence, research_results, context, parameters)
+            evaluation_matrix = self._evaluate_hypotheses(hypotheses, evidence, research_results, relevant_economic_data, relevant_geopolitical_data, context, parameters)
             
             # Analyze results
             analysis_results = self._analyze_results(hypotheses, evidence, evaluation_matrix, context, parameters)
@@ -101,6 +131,111 @@ class ACHTechnique(AnalyticalTechnique):
             logger.error(f"Error executing Analysis of Competing Hypotheses Technique: {e}")
             return self.handle_error(e, context)
     
+    def _gather_evidence(self, question: str, context: AnalysisContext) -> None:
+        """
+        Gather evidence, including research findings, using the research_mcp.
+
+        Args:
+            question: The analytical question.
+            context: Analysis context.
+        """
+        logger.info("Gathering evidence using research_mcp")
+
+        # Get the research_mcp from the mcp_registry
+        research_mcp = self.get_mcp("research_mcp")
+
+        # Check if research_mcp is available
+        if research_mcp:
+            # Fetch research findings
+            research_results = research_mcp.get_research(query=question)
+            # Add research findings to the context
+            context.add("research_results", research_results)
+            logger.info(f"Added research results to context: {research_results}")
+        else:
+            logger.warning("research_mcp not available for gathering evidence.")
+    
+    def _fetch_relevant_economic_data(self, question: str, context: AnalysisContext) -> List[Dict]:
+        """
+        Fetch relevant economic data from EconomicsMCP.
+        
+        Args:
+            question: The analytical question
+            context: Analysis context
+        
+        Returns:
+            List of economic data items
+        """
+        logger.info("Fetching relevant economic data")
+        
+        economics_mcp = self.get_mcp("economics_mcp")
+        if not economics_mcp:
+            logger.warning("EconomicsMCP not available for data fetching.")
+            return []
+        
+        # Determine relevant economic indicators based on the question
+        relevant_indicators = []
+        question_lower = question.lower()
+        
+        if any(keyword in question_lower for keyword in ["gdp", "growth", "economy"]):
+            relevant_indicators.append("GDP")
+        if any(keyword in question_lower for keyword in ["inflation", "cpi", "prices"]):
+            relevant_indicators.append("CPI")
+        if any(keyword in question_lower for keyword in ["unemployment", "jobs", "labor"]):
+            relevant_indicators.append("UNEMPLOYMENT")
+        # Add more indicators based on common keywords...
+        
+        if not relevant_indicators:
+            logger.info("No specific economic indicators identified, fetching default data.")
+            relevant_indicators = ["GDP", "CPI"]  # Default indicators
+        
+        economic_data = []
+        for indicator in relevant_indicators:
+            try:
+                # Fetch data from EconomicsMCP
+                data = economics_mcp.get_data(series_id=indicator, start_date="2020-01-01", end_date="2023-12-31")
+                if data:
+                    economic_data.extend(data)
+            except Exception as e:
+                logger.error(f"Error fetching economic data for {indicator}: {e}")
+        
+        return economic_data
+
+    def _fetch_relevant_geopolitical_data(self, question: str, context: AnalysisContext) -> List[Dict]:
+        """
+        Fetch relevant geopolitical event data from GeopoliticsMCP.
+        
+        Args:
+            question: The analytical question
+            context: Analysis context
+            
+        Returns:
+            List of geopolitical data items
+        """
+        logger.info("Fetching relevant geopolitical data")
+        
+        geopolitics_mcp = self.get_mcp("geopolitics_mcp")
+        if not geopolitics_mcp:
+            logger.warning("GeopoliticsMCP not available for data fetching.")
+            return []
+        
+        # Determine relevant location based on the question
+        relevant_location = "Global"  # Default to global if no location specified
+        question_lower = question.lower()
+        
+        if "ukraine" in question_lower:
+            relevant_location = "Ukraine"
+        elif "middle east" in question_lower:
+            relevant_location = "Middle East"
+        
+        try:
+            # Fetch data from GeopoliticsMCP
+            data = geopolitics_mcp.get_event_data(location=relevant_location, start_date="2023-01-01", end_date="2023-12-31")
+            return data if data else []
+        except Exception as e:
+            logger.error(f"Error fetching geopolitical data for {relevant_location}: {e}")
+            return []
+        
+    
     def _generate_hypotheses(self, question: str, research_results: Dict, context: AnalysisContext, parameters: Dict) -> List[Dict]:
         """
         Generate competing hypotheses.
@@ -117,6 +252,11 @@ class ACHTechnique(AnalyticalTechnique):
         logger.info("Generating hypotheses")
         
         # Check if hypotheses are provided in parameters
+        # Get research results from context
+        research_results = context.get("research_results", {})
+        research_results_content = ""
+        for result in research_results:
+            research_results_content+= f"{result}\n"
         if "hypotheses" in parameters and isinstance(parameters["hypotheses"], list):
             return parameters["hypotheses"]
         
@@ -182,6 +322,13 @@ class ACHTechnique(AnalyticalTechnique):
             - Include both conventional and less conventional possibilities
             - Are specific and testable against evidence
             """
+
+            prompt += f"""
+            Research Findings:
+            {research_results_content}
+
+            Consider the above research findings when generating hypotheses.
+            """
             
             # Ground prompt with research results
             grounded_prompt = self.ground_llm_with_context(prompt, context)
@@ -198,7 +345,38 @@ class ACHTechnique(AnalyticalTechnique):
                 content = ""
                 for section_name, section_content in llama_response["sections"].items():
                     content += section_content + "\n\n"
-                
+
+                # Check for relevance of each hypothesis to the research findings
+                relevant_hypotheses = []
+                for hypothesis in hypotheses:
+                    perplexity_sonar = self.get_mcp("perplexity_sonar")
+                    if perplexity_sonar:
+                        relevance_prompt = f"""
+                        Assess the relevance of the following hypothesis to the research findings provided below.
+
+                        Hypothesis: {hypothesis["statement"]}
+
+                        Research Findings:
+                        {research_results_content}
+
+                        Is this hypothesis relevant to the research findings? Answer with one of the following:
+                        - "relevant"
+                        - "related"
+                        - "supports"
+                        - "not relevant"
+                        """
+                        relevance_response = perplexity_sonar.process({"prompt": relevance_prompt})
+                        if isinstance(relevance_response, dict) and "results" in relevance_response:
+                            relevance_text = relevance_response["results"].get("text", "").lower()
+                            if any(keyword in relevance_text for keyword in ["relevant", "related", "supports"]):
+                                relevant_hypotheses.append(hypothesis)
+                            else:
+                                logger.info(f"Hypothesis '{hypothesis['statement']}' deemed not relevant to research findings.")
+
+                # Filter hypotheses based on relevance
+                if relevant_hypotheses:
+                    hypotheses = relevant_hypotheses
+
                 # Parse hypotheses from content
                 hypotheses = self._parse_hypotheses_from_text(content)
                 if hypotheses:
@@ -1242,7 +1420,7 @@ class ACHTechnique(AnalyticalTechnique):
         
         return diagnostic_value
     
-    def _evaluate_hypotheses(self, hypotheses: List[Dict], evidence: List[Dict], research_results: Dict, context: AnalysisContext, parameters: Dict) -> Dict:
+    def _evaluate_hypotheses(self, hypotheses: List[Dict], evidence: List[Dict], research_results: Dict, relevant_economic_data: List[Dict], relevant_geopolitical_data: List[Dict], context: AnalysisContext, parameters: Dict) -> Dict:
         """
         Evaluate hypotheses against evidence.
         
@@ -1250,6 +1428,8 @@ class ACHTechnique(AnalyticalTechnique):
             hypotheses: List of hypotheses
             evidence: List of evidence items
             research_results: Research results
+            relevant_economic_data: relevant economic data.
+            relevant_geopolitical_data: relevant geopolitical data.
             context: Analysis context
             parameters: Technique parameters
             
@@ -1266,6 +1446,36 @@ class ACHTechnique(AnalyticalTechnique):
             "scores": {}
         }
         
+        # Format economic and geopolitical data for prompt
+        economic_data_text = ""
+        if relevant_economic_data:
+            economic_data_text += "Relevant Economic Data:\n"
+            for item in relevant_economic_data:
+                date = item.get("date", "")
+                value = item.get("value", "")
+                series_id = item.get("series_id","")
+
+                economic_data_text += f"- {date}: {series_id} = {value}\n"
+
+        geopolitical_data_text = ""
+        if relevant_geopolitical_data:
+            geopolitical_data_text += "Relevant Geopolitical Event Data:\n"
+            for item in relevant_geopolitical_data:
+                date = item.get("date", "")
+                event_code = item.get("event_code", "")
+                actor1 = item.get("actor1", "")
+                actor2 = item.get("actor2", "")
+
+                geopolitical_data_text += f"- {date}: Event Code {event_code} between {actor1} and {actor2}\n"
+
+        #create a prompt to the llm
+        prompt = f"""
+        Consider the following economic data: {economic_data_text}
+        Consider the following geopolitical event data: {geopolitical_data_text}
+        Now assess the evidence against the hypotheses. 
+        """
+        context.add_metadata("data_grounding_prompt", prompt)
+
         # Fill matrix with consistency values from evidence diagnostic value
         for item in evidence:
             item_id = item.get("id", "")
@@ -1273,6 +1483,28 @@ class ACHTechnique(AnalyticalTechnique):
             
             if item_id and diagnostic_value:
                 evaluation_matrix["matrix"][item_id] = diagnostic_value
+
+        # Incorporate uncertainty information from UncertaintyMappingTechnique
+        uncertainty_results = context.get_technique_result("uncertainty_mapping")
+        if uncertainty_results and "uncertainties" in uncertainty_results:
+            for uncertainty in uncertainty_results["uncertainties"]:
+                uncertainty_description = uncertainty.get("uncertainty", "")
+                uncertainty_impact = uncertainty.get("impact", "low")
+
+                for item in evidence:
+                    item_description = item.get("description", "")
+                    # Check if evidence is related to uncertainty
+                    if uncertainty_description.lower() in item_description.lower() or item_description.lower() in uncertainty_description.lower():
+                        # Discount the consistency of this evidence based on uncertainty impact
+                        for hypothesis_id in evaluation_matrix["hypotheses"]:
+                            if item.get("id", "") in evaluation_matrix["matrix"]:
+                                consistency = evaluation_matrix["matrix"][item.get("id", "")].get(hypothesis_id, "NA")
+                                if consistency in ["CC", "C"]:
+                                    if uncertainty_impact == "high":
+                                        evaluation_matrix["matrix"][item.get("id", "")][hypothesis_id] = "NA"
+                                    elif uncertainty_impact == "medium":
+                                        evaluation_matrix["matrix"][item.get("id", "")][hypothesis_id] = "NA"
+
         
         # Calculate scores
         for hypothesis in hypotheses:
@@ -1332,6 +1564,7 @@ class ACHTechnique(AnalyticalTechnique):
         
         # Get scores
         scores = evaluation_matrix.get("scores", {})
+        
         
         # Rank hypotheses by weighted inconsistency count (lower is better)
         ranked_hypotheses = []
@@ -1416,6 +1649,26 @@ class ACHTechnique(AnalyticalTechnique):
                                 "impact": "Distinguishes between top hypotheses"
                             })
         
+        # Incorporate uncertainty information
+        uncertainty_results = context.get_technique_result("uncertainty_mapping")
+        if uncertainty_results and "uncertainties" in uncertainty_results:
+            for uncertainty in uncertainty_results["uncertainties"]:
+                uncertainty_description = uncertainty.get("uncertainty", "")
+                uncertainty_impact = uncertainty.get("impact", "low")
+
+                # Check if top-ranked hypothesis is highly sensitive to a specific uncertainty
+                for item in evidence:
+                    item_description = item.get("description", "")
+                    if uncertainty_description.lower() in item_description.lower() or item_description.lower() in uncertainty_description.lower():
+                        for hypothesis_id in evaluation_matrix["hypotheses"]:
+                            if hypothesis_id == most_likely_hypothesis["id"] and uncertainty_impact == "high":
+                                sensitivity_points.append({
+                                    "evidence_id": item.get("id"),
+                                    "description": item_description,
+                                    "impact": f"Highly sensitive to uncertainty: {uncertainty_description}"
+                                })
+                                most_likely_hypothesis["confidence"] = "low"
+
         # Compile analysis results
         analysis_results = {
             "ranked_hypotheses": ranked_hypotheses,
@@ -1444,11 +1697,23 @@ class ACHTechnique(AnalyticalTechnique):
         most_likely_hypothesis = analysis_results.get("most_likely_hypothesis")
         if most_likely_hypothesis:
             findings.append({
-                "finding": f"The most likely hypothesis based on evidence is: {most_likely_hypothesis.get('statement', '')}",
-                "confidence": "medium",
-                "source": "analysis_of_competing_hypotheses"
-            })
-        
+                    "finding": f"The most likely hypothesis based on evidence is: {most_likely_hypothesis.get('statement', '')}",
+                    "confidence": most_likely_hypothesis.get("confidence", "medium"),  # Use the confidence level from the hypothesis
+                    "source": "analysis_of_competing_hypotheses"
+                })
+
+        # Adjust confidence based on sensitivity points
+        if most_likely_hypothesis:
+            sensitivity_points = analysis_results.get("sensitivity_points", [])
+            for sensitivity in sensitivity_points:
+                if "Highly sensitive" in sensitivity.get("impact", ""):
+                    if findings:
+                        # find the finding that corresponds to this hypothesis and adjust the confidence accordingly
+                        for finding in findings:
+                            if most_likely_hypothesis.get("statement", "") in finding.get("finding", ""):
+                                finding["confidence"] = "low"
+                                break
+
         # Add finding about key evidence
         key_evidence = analysis_results.get("key_evidence", [])
         if key_evidence:

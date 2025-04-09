@@ -10,6 +10,8 @@ from typing import Dict, List, Any, Optional
 
 from .analytical_technique import AnalyticalTechnique
 from utils.llm_integration import call_llm, extract_content, parse_json_response, MODEL_CONFIG
+from data.domain_mcp import DomainMCP
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -41,13 +43,34 @@ class IndicatorsDevelopmentTechnique(AnalyticalTechnique):
         source_technique = parameters.get("source_technique", None)
         indicator_types = parameters.get("indicator_types", ["leading", "coincident", "lagging"])
         
+
+        # Fetch relevant economic and geopolitical data
+        economic_mcp = self.mcp_registry.get_mcp("economics_mcp")
+        geopolitics_mcp = self.mcp_registry.get_mcp("geopolitics_mcp")
+        
+        economic_data = None
+        geopolitical_data = None
+        
+        if economic_mcp:
+            try:
+                economic_data = economic_mcp.get_relevant_economic_data(context.question)
+            except Exception as e:
+                logger.error(f"Error fetching economic data: {e}")
+        
+        if geopolitics_mcp:
+            try:
+                geopolitical_data = geopolitics_mcp.get_relevant_geopolitical_data(context.question)
+            except Exception as e:
+                logger.error(f"Error fetching geopolitical data: {e}")
+
+
         # Step 1: Identify key aspects to monitor
         key_aspects = self._identify_key_aspects(context, source_technique)
         
         # Step 2: Develop indicators for each aspect
-        indicators = self._develop_indicators(context.question, key_aspects, indicator_types)
+        indicators = self._develop_indicators(context.question, key_aspects, indicator_types, economic_data, geopolitical_data)
         
-        # Step 3: Assess indicator quality
+        # Step 3: Assess indicator quality 
         indicator_assessment = self._assess_indicator_quality(indicators)
         
         # Step 4: Develop monitoring plan
@@ -272,7 +295,7 @@ class IndicatorsDevelopmentTechnique(AnalyticalTechnique):
             }
         ]
     
-    def _develop_indicators(self, question, key_aspects, indicator_types):
+    def _develop_indicators(self, question, key_aspects, indicator_types, economic_data, geopolitical_data):
         """
         Develop indicators for each key aspect.
         
@@ -280,6 +303,8 @@ class IndicatorsDevelopmentTechnique(AnalyticalTechnique):
             question: The analytical question
             key_aspects: List of key aspect dictionaries
             indicator_types: List of indicator types to develop
+            economic_data: Economic data to be included in prompt
+            geopolitical_data: Geopolitical data to be included in prompt
             
         Returns:
             Dictionary mapping aspect names to their indicators
@@ -316,6 +341,18 @@ class IndicatorsDevelopmentTechnique(AnalyticalTechnique):
             Aspect: {aspect_name}
             Description: {aspect_description}
             Category: {aspect_category}
+            
+            Relevant Economic Data:
+            {json.dumps(economic_data, indent=2)}
+            
+            Relevant Geopolitical Data:
+            {json.dumps(geopolitical_data, indent=2)}
+            
+            Consider this data when developing indicators. For example:
+             - Economic indicators might track inflation, GDP growth, or employment rates.
+             - Geopolitical indicators might monitor conflict events, political instability, or trade agreements.
+
+
             
             For this aspect, develop:
             1. 2-3 leading indicators (early warning signs that precede changes)

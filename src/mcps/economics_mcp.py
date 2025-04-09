@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from src.base_mcp import BaseMCP
+from src.techniques.economic_forecasting_technique import EconomicForecastingTechnique
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -32,6 +34,78 @@ class EconomicsMCP(BaseMCP):
     4. Market trend analysis
     5. Economic scenario modeling
     """
+
+    def fetch_fred_data(self, series_id: str, start_date: str, end_date: str) -> List[Dict]:
+        """
+        Fetch economic data from the FRED API.
+        
+        Args:
+            series_id: The FRED series ID (e.g., 'GDP', 'CPIAUCSL').
+            start_date: The start date for the data (YYYY-MM-DD).
+            end_date: The end date for the data (YYYY-MM-DD).
+            
+        Returns:
+            A list of dictionaries with 'date' and 'value' keys.
+        """
+        api_key = self.api_keys.get("FRED_API_KEY")
+        if not api_key:
+            logger.error("FRED API key not found.")
+            raise ValueError("FRED API key not found.")
+
+        url = "https://api.stlouisfed.org/fred/series/observations"
+        params = {"series_id": series_id, "api_key": api_key, "file_type": "json", "observation_start": start_date, "observation_end": end_date}
+
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()  # Raise an exception for bad status codes
+            data = response.json()
+            return [{"date": obs["date"], "value": obs["value"]} for obs in data["observations"]]
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching data from FRED API: {e}")
+            raise
+
+    def forecast_economic_data_with_technique(self, series_id: str, start_date: str, end_date: str, forecast_horizon: int) -> Dict:
+        """
+        Fetch data and use the EconomicForecastingTechnique to forecast.
+
+        Args:
+            series_id: The FRED series ID.
+            start_date: The start date for the data (YYYY-MM-DD).
+            end_date: The end date for the data (YYYY-MM-DD).
+            forecast_horizon: Number of periods to forecast.
+
+        Returns:
+            The forecast results from the EconomicForecastingTechnique.
+        """
+        data_list = self.fetch_fred_data(series_id, start_date, end_date)
+        if not data_list:
+            logger.error(f"No data fetched for series ID: {series_id} between {start_date} and {end_date}.")
+            raise ValueError("No data fetched for given parameters.")
+        
+        if not self.api_keys.get("FRED_API_KEY"):
+            raise ValueError("FRED API key not found.")
+
+        url = "https://api.stlouisfed.org/fred/series/observations"
+        params = {"series_id": series_id, "api_key": api_key, "file_type": "json", "observation_start": start_date, "observation_end": end_date}
+
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()  # Raise an exception for bad status codes
+            data = response.json()
+            return [{"date": obs["date"], "value": obs["value"]} for obs in data["observations"]]
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching data from FRED API: {e}")
+            raise
+
+        # Convert list of dict to dataframe
+        df = pd.DataFrame(data_list)
+        df['date'] = pd.to_datetime(df['date'])
+        df['value'] = pd.to_numeric(df['value'])
+        
+        # Create and use the technique
+        technique = EconomicForecastingTechnique()
+        return technique.forecast(df, forecast_horizon)
+
     
     def __init__(self, api_keys: Dict[str, str] = None):
         """
@@ -532,8 +606,30 @@ class EconomicsMCP(BaseMCP):
             "start_date": start_date,
             "end_date": end_date
         })
-        
+
+        # Fetch FRED data for the indicators
+        fred_data = {}
+        for indicator_name, indicator_info in indicator_data.get("indicators", {}).items():
+            metadata = indicator_info.get("metadata", {})
+            if metadata.get("source") == "fred":
+                fred_id = metadata.get("source_id")
+                df = self._get_fred_data(fred_id, start_date, end_date)
+                fred_data[indicator_name] = df
+
+
+        # Get the LLM to use. Assume it's registered as "llama4_scout"
+        llama4_scout = self.mcp_registry.get_mcp("llama4_scout")
+
         # Analyze trends for each indicator
+        
+        prompt = (
+            f"You are an expert economist. Analyze the following economic data for {country}. "
+            f"The data includes the following indicators: {', '.join(indicators)}. "
+            f"Here is the data from FRED for these indicators:\n"
+        )
+        for indicator, df in fred_data.items():
+            prompt += f"Indicator: {indicator}\n{df.to_string()}\n\n"
+
         trend_analysis = {}
         for indicator, data in indicator_data.get("indicators", {}).items():
             # Convert data to DataFrame
@@ -597,7 +693,42 @@ class EconomicsMCP(BaseMCP):
                 logger.error(f"Error analyzing trends for {indicator}: {str(e)}")
                 trend_analysis[indicator] = {"error": str(e)}
         
-        # Analyze correlations between indicators
+        prompt += "For each indicator, provide a summary of the key trends.\n"
+        for indicator, analysis in trend_analysis.items():
+            prompt += f"Indicator: {indicator}\n"
+            prompt += f"Latest Value: {analysis['latest_value']}\n"
+            prompt += f"Total Change: {analysis['total_change']}\n"
+
+            prompt += f"Percent Change: {analysis['percent_change']}\n"
+            prompt += f"Recent Trend: {analysis['recent_trend']}\n"
+            prompt += f"Volatility: {analysis['volatility']}\n"
+            prompt += f"Seasonality: {analysis['seasonality']}\n\n"
+
+        # Add a section about correlations to the prompt
+        prompt += "Correlations between indicators:\n"
+        # Get correlations between indicators
+        correlation_analysis = {}
+        combined_df = None
+        for indicator, data in indicator_data.get("indicators", {}).items():
+            # Convert data to DataFrame
+            df_dict = data.get("data", {})
+            if not df_dict:
+                continue
+
+            # Reconstruct DataFrame
+            df = pd.DataFrame(df_dict)
+            if combined_df is None:
+                combined_df = df
+            else:
+                combined_df = pd.concat([combined_df, df], axis=1)
+
+        # Calculate correlations
+        if combined_df is not None and len(combined_df.columns) > 1:
+            corr_matrix = combined_df.corr()
+            for i in range(len(corr_matrix.columns)):
+                for j in range(i+1, len(corr_matrix.columns)):
+                    prompt += f"{corr_matrix.columns[i]} and {corr_matrix.columns[j]}: {corr_matrix.iloc[i, j]:.2f}\n"
+
         correlations = {}
         try:
             # Combine all indicators into a single DataFrame
@@ -633,11 +764,29 @@ class EconomicsMCP(BaseMCP):
         except Exception as e:
             logger.error(f"Error calculating correlations: {str(e)}")
             correlations = {"error": str(e)}
+        prompt += f"What are the implications of these correlations?\n"
+        
+        # call the LLM to analyze the trends
+        if llama4_scout is None:
+            logger.error(f"Could not find llama4_scout in MCP registry.")
+            return {"error": "Could not find llama4_scout in MCP registry."}
+
+        llm_result = llama4_scout.process({"prompt": prompt})
+        if "error" in llm_result:
+            logger.error(f"LLM analysis failed: {llm_result['error']}")
+            return {"error": f"LLM analysis failed: {llm_result['error']}"}
+
+        try:
+            llm_analysis = json.loads(llm_result['text'])
+        except Exception as e:
+            logger.error(f"Error parsing LLM response: {str(e)}")
+            llm_analysis = {"error": str(e)}
         
         # Compile results
         return {
             "trend_analysis": trend_analysis,
             "correlations": correlations,
+            "llm_analysis": llm_analysis,
             "country": country,
             "timestamp": time.time()
         }

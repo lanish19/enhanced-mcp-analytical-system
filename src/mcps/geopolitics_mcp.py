@@ -48,6 +48,7 @@ class GeopoliticsMCP(BaseMCP):
         
         # Set API keys
         self.api_keys = api_keys or {}
+        self.api_keys["GDELT_API_KEY"] = self.api_keys.get("GDELT_API_KEY", None)
         
         # Set default API keys from environment variables
         if "GDELT_API_KEY" not in self.api_keys:
@@ -332,32 +333,65 @@ class GeopoliticsMCP(BaseMCP):
         
         return knowledge_base
     
-    def _get_gdelt_data(self, countries: List[str], event_types: List[str] = None, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    def _get_gdelt_data(self, countries: List[str], event_types: List[str] = None, start_date: str = None, end_date: str = None, max_records: int=250) -> pd.DataFrame:
         """
         Get event data from GDELT (Global Database of Events, Language, and Tone).
         
         Args:
-            countries: List of country codes
-            event_types: List of event type codes
-            start_date: Start date (YYYY-MM-DD)
-            end_date: End date (YYYY-MM-DD)
+            countries (List[str]): List of country codes (e.g., "USA", "CHN").
+            event_types (List[str], optional): List of event type codes. Defaults to None.
+            start_date (str, optional): Start date in "YYYY-MM-DD" format. Defaults to None.
+            end_date (str, optional): End date in "YYYY-MM-DD" format. Defaults to None.
+            max_records (int): The maximum number of records to retrieve from the API. Defaults to 250.
             
         Returns:
-            DataFrame with event data
+            pd.DataFrame: DataFrame with event data, or an empty DataFrame if no data is available or an error occurs.
         """
+        api_key = self.api_keys.get("GDELT_API_KEY")
+        if not api_key:
+            logger.warning("No GDELT API key available, using mock data")
+            return self._get_mock_event_data(countries, event_types, start_date, end_date)
+
         # Check cache
         cache_key = f"gdelt_{'_'.join(countries)}_{start_date}_{end_date}"
         if cache_key in self.data_cache:
             logger.info(f"Using cached data for {cache_key}")
             return self.data_cache[cache_key]
-        
-        # Set default dates if not provided
+
         if not end_date:
             end_date = datetime.now().strftime("%Y-%m-%d")
-        
         if not start_date:
             start_date_dt = datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=30)  # 30 days
             start_date = start_date_dt.strftime("%Y-%m-%d")
+        
+        try:
+            url = "https://api.gdeltproject.org/api/v2/geo/geo"
+            
+            params = {
+                "query": " OR ".join([f"countrycode:{country}" for country in countries]),
+                "mode": "EventList",
+                "format": "JSON",
+                "maxrecords": max_records,
+                "startdatetime": f"{start_date}000000",  # format is YYYYMMDDHHMMSS
+                "enddatetime": f"{end_date}235959", # format is YYYYMMDDHHMMSS
+                "sort": "dateasc",
+                "apikey": api_key,
+            }
+
+            response = requests.get(url, params=params)
+            response.raise_for_status()  # Raise an exception for bad status codes
+
+            data = response.json().get("events", [])
+            if not data:
+                logger.info("No GDELT event data found for the specified criteria.")
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(data)
+            self.data_cache[cache_key] = df
+            return df
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error getting GDELT data: {e}")
+            return pd.DataFrame()
         
         # For now, use mock data as GDELT API can be complex
         df = self._get_mock_event_data(countries, event_types, start_date, end_date)

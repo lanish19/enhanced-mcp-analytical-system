@@ -23,6 +23,7 @@ class SynthesisGenerationTechnique(AnalyticalTechnique):
     resolves contradictions, identifies patterns, and generates a comprehensive
     synthesis that addresses the original question.
     """
+
     
     def execute(self, context, parameters):
         """
@@ -378,6 +379,16 @@ class SynthesisGenerationTechnique(AnalyticalTechnique):
             4. Use these patterns to provide a robust answer to the original question
             """
         
+        # Check for UncertaintyMappingTechnique results and include them if present
+        uncertainty_info = ""
+        if "Uncertainty Mapping" in context.results:
+            uncertainty_mapping_results = context.results["Uncertainty Mapping"]
+            uncertainty_info = f"""
+            Key Uncertainties and Impact Assessments:
+            {json.dumps(uncertainty_mapping_results, indent=2)}
+            """
+
+
         # Use LLM to generate integrated synthesis
         prompt = f"""
         Generate an integrated synthesis for the following analytical question:
@@ -390,6 +401,8 @@ class SynthesisGenerationTechnique(AnalyticalTechnique):
         Patterns and Contradictions:
         {json.dumps(patterns_contradictions, indent=2)}
         
+        {uncertainty_info}
+
         {focus_instructions}
         
         Return your synthesis as a JSON object with the following structure:
@@ -409,6 +422,7 @@ class SynthesisGenerationTechnique(AnalyticalTechnique):
                 "low_confidence_areas": ["Area 1", "Area 2", ...]
             }},
             "remaining_uncertainties": ["Uncertainty 1", "Uncertainty 2", ...]
+            "Justify your confidence assessment explicitly based on the identified uncertainties."
         }}
         """
         
@@ -461,12 +475,22 @@ class SynthesisGenerationTechnique(AnalyticalTechnique):
             Dictionary containing the final assessment
         """
         logger.info("Generating final assessment")
+
+        # Check for UncertaintyMappingTechnique results and include them if present
+        uncertainty_info = ""
+        if "Uncertainty Mapping" in context.results:
+            uncertainty_mapping_results = context.results["Uncertainty Mapping"]
+            uncertainty_info = f"""
+            Key Uncertainties and Impact Assessments:
+            {json.dumps(uncertainty_mapping_results, indent=2)}
+            """
         
         prompt = f"""
         Generate a final assessment for the following analytical question based on the integrated synthesis:
         
         Question: "{question}"
         
+        {uncertainty_info}
         Integrated Synthesis:
         {json.dumps(integrated_synthesis, indent=2)}
         
@@ -475,7 +499,8 @@ class SynthesisGenerationTechnique(AnalyticalTechnique):
         2. A rationale for this judgment based on the integrated synthesis
         3. A confidence level in this judgment (High/Medium/Low)
         4. Potential biases that might be affecting this analysis
-        5. Recommendations for further analysis or research
+        5. Recommendations for further analysis or research.
+        6. Justify your confidence assessment explicitly based on the identified uncertainties.
         
         Return your assessment as a JSON object with the following structure:
         {{

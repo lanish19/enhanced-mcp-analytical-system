@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 
 from .analytical_technique import AnalyticalTechnique
 from utils.llm_integration import call_llm, extract_content, parse_json_response, MODEL_CONFIG
+from mcps.economics_mcp import EconomicsMCP
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -243,10 +244,22 @@ class HistoricalAnalogiesTechnique(AnalyticalTechnique):
                 # Fall through to LLM-based identification
         
         # Extract key elements for the prompt
+        # Fetch economic and geopolitical data for potential historical analogies
+        economic_mcp: EconomicsMCP = self.mcp_registry.get_mcp("economics_mcp")
+        geopolitics_mcp = self.mcp_registry.get_mcp("geopolitics_mcp")
+        
         core_situation = current_elements.get("core_situation", "")
         key_elements = [e.get("element", "") for e in current_elements.get("key_elements", [])]
         contextual_factors = [f.get("factor", "") for f in current_elements.get("contextual_factors", [])]
-        
+
+        economic_data = ""
+        geopolitical_data = ""
+        if economic_mcp:
+            economic_data = economic_mcp.get_relevant_economic_data(question, time_period)
+        if geopolitics_mcp:
+            geopolitical_data = geopolitics_mcp.get_relevant_geopolitical_data(question, time_period)
+
+        # Use LLM to identify historical analogies
         # Use LLM to identify historical analogies
         prompt = f"""
         Identify {num_analogies} historical analogies to the following situation:
@@ -260,6 +273,15 @@ class HistoricalAnalogiesTechnique(AnalyticalTechnique):
         
         Contextual Factors:
         {json.dumps(contextual_factors, indent=2)}
+        
+        
+        Historical Economic Context:
+        {json.dumps(economic_data, indent=2)}
+        
+        
+        Historical Geopolitical Context:
+        {json.dumps(geopolitical_data, indent=2)}
+        
         
         Time Period Constraint: {time_period}
         
@@ -292,7 +314,7 @@ class HistoricalAnalogiesTechnique(AnalyticalTechnique):
         }}
         """
         
-        model_config = MODEL_CONFIG["sonar_deep"]
+        model_config = MODEL_CONFIG["sonar"]
         response = call_llm(prompt, model_config)
         content = extract_content(response)
         

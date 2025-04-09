@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 
 from .analytical_technique import AnalyticalTechnique
 from utils.llm_integration import call_llm, extract_content, parse_json_response, MODEL_CONFIG
+from src.mcps.economics_mcp import EconomicsMCP
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -39,12 +40,15 @@ class CrossImpactAnalysisTechnique(AnalyticalTechnique):
         
         # Get parameters or use defaults
         source_technique = parameters.get("source_technique", None)
+        
+        # Get relevant data from Domain MCPs
+        economic_data, geopolitical_data = self._fetch_domain_data(context)
         max_factors = parameters.get("max_factors", 8)
         
         # Step 1: Identify key factors
         factors = self._identify_factors(context, source_technique, max_factors)
         
-        # Step 2: Create cross-impact matrix
+        # Step 2: Create cross-impact matrix, including domain data in the prompt
         impact_matrix = self._create_impact_matrix(context.question, factors)
         
         # Step 3: Analyze matrix for insights
@@ -53,7 +57,7 @@ class CrossImpactAnalysisTechnique(AnalyticalTechnique):
         # Step 4: Identify second-order effects
         second_order_effects = self._identify_second_order_effects(impact_matrix)
         
-        # Step 5: Generate final synthesis
+        # Step 5: Generate final synthesis, including domain data in the prompt
         synthesis = self._generate_synthesis(context.question, factors, impact_matrix, matrix_analysis, second_order_effects)
         
         return {
@@ -77,6 +81,31 @@ class CrossImpactAnalysisTechnique(AnalyticalTechnique):
             List of MCP names that enhance this technique
         """
         return ["factor_extraction_mcp", "impact_analysis_mcp"]
+
+    def _fetch_domain_data(self, context):
+        """
+        Fetch relevant economic and geopolitical data based on the question.
+
+        Args:
+            context: The analysis context
+
+        Returns:
+            Tuple: economic_data, geopolitical_data
+        """
+        economic_data = {}
+        geopolitical_data = {}
+        try:
+            economics_mcp: EconomicsMCP = self.mcp_registry.get_mcp("economics_mcp")
+            if economics_mcp:
+                economic_data = economics_mcp.fetch_fred_data("GDP", "2020-01-01", "2023-12-31")
+            geopolitics_mcp = self.mcp_registry.get_mcp("geopolitics_mcp")
+            if geopolitics_mcp:
+                geopolitical_data = geopolitics_mcp.fetch_gdelt_data("world", "2023-01-01", "2023-12-31")
+        except Exception as e:
+            logger.error(f"Error fetching domain data: {e}")
+            context.log_error(f"Error fetching domain data: {e}")
+
+        return economic_data, geopolitical_data
     
     def _identify_factors(self, context, source_technique, max_factors):
         """
@@ -279,10 +308,13 @@ class CrossImpactAnalysisTechnique(AnalyticalTechnique):
         
         return fallback_factors[:max_factors]
     
-    def _create_impact_matrix(self, question, factors):
+    def _create_impact_matrix(self, question, factors, economic_data=None, geopolitical_data=None):
         """
         Create a cross-impact matrix assessing how factors influence each other.
         
+        Args:
+            economic_data (dict): Economic data from the EconomicsMCP.
+            geopolitical_data (dict): Geopolitical data from the GeopoliticsMCP.
         Args:
             question: The analytical question
             factors: List of factor dictionaries
@@ -315,6 +347,13 @@ class CrossImpactAnalysisTechnique(AnalyticalTechnique):
         for i, source_factor in enumerate(factors):
             source_name = source_factor["name"]
             source_desc = source_factor["description"]
+            
+            # Include economic and geopolitical data in the prompt, if available
+            domain_data_context = ""
+            if economic_data:
+                domain_data_context += f"\nEconomic Data:\n{json.dumps(economic_data, indent=2)}"
+            if geopolitical_data:
+                domain_data_context += f"\nGeopolitical Data:\n{json.dumps(geopolitical_data, indent=2)}"
             
             # Create a row of impacts
             impact_row = []
@@ -360,7 +399,9 @@ class CrossImpactAnalysisTechnique(AnalyticalTechnique):
                 
                 Return your assessment as a JSON object with the following structure:
                 {{
-                    "impact": Impact score (-3 to +3),
+                    "impact": Impact score (-3 to +3)
+                    
+                    {domain_data_context}
                     "description": "Brief explanation of the impact relationship"
                 }}
                 """

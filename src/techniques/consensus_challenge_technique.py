@@ -460,13 +460,16 @@ class ConsensusChallengeTechnique(AnalyticalTechnique):
                 
                 Your task is to systematically challenge this consensus view by:
                 
-                1. Identifying potential weaknesses or blind spots in the consensus position
-                2. Presenting alternative perspectives or contrarian viewpoints
-                3. Highlighting evidence that contradicts or complicates the consensus view
-                4. Exploring assumptions that underlie the consensus position
-                
-                Provide a balanced, thoughtful challenge that doesn't simply dismiss the consensus but critically examines it.
+                1.  Identifying potential weaknesses or blind spots in the consensus position.
+                2.  Presenting alternative perspectives or contrarian viewpoints.
+                3.  Highlighting evidence, data, or logical reasoning that contradicts or complicates the consensus view.
+                4.  Exploring assumptions that underlie the consensus position.
+
+                Each challenge should be supported by specific evidence, data, or logical reasoning. Do not rely on general or unsubstantiated criticisms. Focus on challenges that can be supported with concrete evidence or logical arguments. Avoid making vague or unsubstantiated claims.
+
+                Provide a balanced, thoughtful, evidence-based critique that doesn't simply dismiss the consensus but critically examines it.
                 """
+
                 
                 # Call Llama4ScoutMCP
                 llama_response = llama4_scout.process({

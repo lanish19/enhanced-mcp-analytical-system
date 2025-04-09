@@ -1,0 +1,387 @@
+﻿World-Class Assessment Agent Enhancement Checklist:
+
+
+1. Principle: Dynamically Adapt Methodology
+
+
+[ ] What: Implement core dynamic logic in WorkflowOrchestratorMCP.
+How: Replace placeholder methods (_generate_analysis_strategy, _adapt_strategy, _check_adaptation_criteria) with LLM-driven or sophisticated rule-based logic. Strategy generation should use context.question_analysis to select/sequence/parameterize techniques. Adaptation should use context.results to trigger modifications (inserting/replacing/modifying steps like adding RedTeamingTechnique or ACHTechnique when specific conditions like high bias or conflicting hypotheses are met).
+Why: Avoids rigid, inefficient workflows; tailors analysis to the specific question and evolving findings, leading to more relevant and deeper insights. Prevents applying inappropriate techniques.
+Difficulty: Hard. Requires significant prompt engineering for the LLM calls (or complex rule engine design), robust parsing of LLM outputs, careful state management within the orchestrator, and defining effective adaptation triggers. This is the core "intelligence" of the system.
+2. Principle: Ground Analysis in Verifiable Evidence
+
+
+[ ] What: Integrate real data sources into Domain MCPs (EconomicsMCP, GeopoliticsMCP, future domain MCPs).
+How: Identify relevant APIs/databases for each domain (e.g., FRED, World Bank Data API, GDELT, specific financial APIs). Add API client code within the MCPs. Modify MCP methods to fetch relevant data based on the question/context. Crucially, inject this fetched data into the LLM prompts used for analysis within the MCP, instructing the LLM to reason based on the provided data. Securely manage API keys via enhanced configuration.
+Why: Prevents analysis detached from reality, reduces factual errors/hallucinations, ensures assessments reflect the current state of the world, increases trustworthiness. Avoids the pitfall of relying solely on potentially biased/outdated LLM knowledge.
+Difficulty: Medium to Hard. Requires identifying suitable APIs/data sources, implementing robust API clients with error handling, significant prompt engineering to effectively blend data with LLM reasoning, and managing API keys/costs. Effort varies per domain.
+[ ] What: Ensure techniques use fetched research data (ResearchMCP output).
+How: Modify techniques like ACHTechnique, HypothesisTesting, etc., to explicitly access research results stored in AnalysisContext. Pass relevant text snippets/summaries from the ResearchMCP output into the technique's LLM prompts, instructing the LLM to evaluate claims against this specific evidence.
+Why: Grounds hypothesis evaluation and other analytical steps in externally retrieved information, enhancing objectivity and reducing reliance on the LLM's internal knowledge alone.
+Difficulty: Medium. Requires careful context passing between MCPs/techniques and prompt engineering to ensure the LLM correctly utilizes the provided evidence snippets.
+3. Principle: Quantify and Communicate Uncertainty Explicitly
+
+
+[ ] What: Enhance UncertaintyMappingTechnique and integrate its output into SynthesisGenerationTechnique.
+How: Refine LLM prompts in UncertaintyMappingTechnique to better identify sources and types (epistemic/aleatory) of uncertainty and assess impact rigorously. Modify SynthesisGenerationTechnique prompts (_generate_integrated_synthesis, _generate_final_assessment) to explicitly require incorporating the list of critical uncertainties from the UncertaintyMappingTechnique output. The final confidence assessment must be explicitly justified based on these uncertainties.
+Why: Avoids false certainty; provides users with a realistic understanding of the assessment's limitations; enables better decision-making under uncertainty. Directly addresses the pitfall of ignoring/downplaying uncertainty.
+Difficulty: Medium. Requires careful prompt engineering for both techniques and ensuring the data flows correctly between them. Quantifying uncertainty reliably from qualitative inputs is inherently challenging.
+4. Principle: Actively Challenge Assumptions and Biases
+
+
+[ ] What: Strengthen challenge techniques (RedTeamingTechnique, ConsensusChallengeTechnique) and implement structural debiasing.
+How:
+Refine challenge technique prompts to demand specific, evidence-based counter-arguments, not just generic disagreement. Consider adding non-LLM checks (e.g., logical consistency checks between challenge and target).
+Implement explicit assumption tracking: Modify AnalysisContext to store assumptions; update KeyAssumptionsCheckTechnique to log assumptions; include logged assumptions in challenge/synthesis prompts.
+Ensure MultiPersonaTechnique prompts encourage critical perspectives.
+Why: Actively combats confirmation bias and groupthink (both human and LLM); reveals hidden vulnerabilities; increases analytical rigor. Avoids the pitfall of unchallenged, biased conclusions.
+Difficulty: Medium to Hard. Designing effective, non-superficial challenge prompts is difficult. Implementing robust assumption tracking and structural checks requires careful design.
+5. Principle: Leverage Specialized Knowledge Appropriately
+
+
+[ ] What: Implement new Domain MCPs and enhance existing ones beyond LLM wrappers.
+How: Prioritize adding Domain MCPs for key target areas (e.g., Technology, Social Science). Crucially, focus on integrating real data sources/APIs (see #2) or potentially calling specialized external models/simulators where appropriate, rather than just creating more LLM prompt wrappers.
+Why: Provides genuine depth and accuracy in specific domains that a general LLM lacks; grounds analysis in domain-specific facts and models. Avoids the pitfall of superficial domain analysis based only on LLM general knowledge.
+Difficulty: Hard. Requires identifying/accessing relevant domain-specific data/models/APIs, implementing integrations, and potentially significant domain expertise to guide the MCP's logic and prompting. Effort varies greatly per domain.
+6. Principle: Provide Transparent and Traceable Reasoning
+
+
+[ ] What: Enhance logging and synthesis referencing.
+How:
+Implement detailed logging within WorkflowOrchestratorMCP to record why specific techniques were chosen or why the workflow adapted. Store this reasoning in AnalysisContext.events.
+Modify SynthesisGenerationTechnique prompts to require explicit references back to the specific techniques and evidence supporting key judgments (e.g., "Conclusion X is supported by [Technique Y]'s finding Z, based on evidence from [Source A]").
+Ensure the final output clearly presents the executed workflow path and the justification for key steps/adaptations.
+Why: Builds user trust; allows verification of the analytical process; enables debugging and improvement; distinguishes the agent from opaque "black box" systems. Avoids the pitfall of untrustworthy results.
+Difficulty: Medium. Requires disciplined logging throughout the codebase and sophisticated prompt engineering for the synthesis step to generate traceable justifications.
+Addressing these points, particularly the dynamic orchestration, data grounding, and robust challenge mechanisms, requires significant effort beyond simple code fixes. They involve architectural decisions, complex prompt engineering, API integrations, and potentially incorporating non-LLM logic, representing the core challenges in building a truly world-class AI assessment agent.
+
+
+
+
+
+
+SPECIFIC FIXES TO ADDRESS
+
+
+# Brainstorming Dynamic Methodology Adaptation in WorkflowOrchestratorMCP
+
+
+This document details implementation ideas for achieving Principle 1: Dynamically Adapt Methodology, focusing on the `WorkflowOrchestratorMCP` (`src/workflow_orchestrator_mcp.py`).
+
+
+## Principle 1: Dynamically Adapt Methodology
+
+
+**Goal:** Replace the current placeholder/hardcoded logic with a dynamic approach that tailors the initial workflow strategy based on question characteristics.
+
+
+**Recommended Approach:** Hybrid (Rules + LLM Refinement)
+
+
+**Implementation Steps:**
+
+
+1.  **Define Initial Candidate Rules:**
+    *   Create a simple rule set (e.g., Python dictionary or function) that maps primary `question_type` (from `context.question_analysis`) and potentially key `domains` to a *superset* of potentially relevant technique names.
+    *   *Example Rule:* `IF type=='predictive' THEN candidates = ['scenario_triangulation', 'trend_analysis', 'cross_impact', 'uncertainty_mapping', ...]`. `IF 'economics' in domains THEN add 'economics_mcp.analyze_economic_trends' to candidates`.
+    *   This step narrows down the possibilities before involving the LLM.
+
+
+2.  **Gather Technique Metadata:**
+    *   Ensure each `AnalyticalTechnique` class has a method (e.g., `get_metadata()`) returning structured info: purpose, inputs, outputs, strengths/weaknesses, suitable question types/domains.
+    *   The orchestrator should be able to access this metadata for the candidate techniques.
+
+
+3.  **Implement LLM Refinement Call (`_generate_analysis_strategy`):**
+    *   Inside `_generate_analysis_strategy`, after getting the candidate list:
+        *   Construct a detailed prompt for a capable LLM (e.g., `llama4_scout`).
+        *   **Prompt Inputs:**
+            *   The full `context.question_analysis` (type, domains, complexity, uncertainty, etc.).
+            *   The original `context.question`.
+            *   The list of candidate technique names.
+            *   Relevant metadata for each candidate technique.
+            *   The desired output JSON structure (matching `AnalysisStrategy`).
+        *   **Prompt Instructions:**
+            *   "Act as an expert intelligence analyst designing an optimal workflow."
+            *   "From the candidate techniques provided, select the most relevant sequence of 3-5 core techniques for analyzing the given question based on its characteristics."
+            *   "Order the selected techniques logically, considering potential dependencies."
+            *   "For each selected technique, provide a concise `purpose` explaining *why* it's included in this specific workflow."
+            *   "Suggest initial `parameters` for each technique, tuned to the question's context (e.g., more scenarios if complexity is high, specific focus if domain is narrow)."
+            *   "Output the result as a valid JSON object matching the specified `AnalysisStrategy` structure."
+    *   Make the LLM call using `utils.llm_integration.call_llm`.
+
+
+4.  **Parse and Validate LLM Output:**
+    *   Use `utils.llm_integration.parse_json_response` to get the JSON output.
+    *   **Crucially:** Validate the parsed JSON.
+        *   Does it match the `AnalysisStrategy` structure?
+        *   Are the selected `technique` names valid and available in `self.technique_registry`?
+        *   Are the suggested `parameters` reasonable for the techniques? (Basic checks).
+        *   Use Pydantic models for robust validation if possible.
+    *   Implement fallback logic: If parsing/validation fails, either retry the LLM call with refined instructions or fall back to a simpler rule-based default strategy (`_generate_default_strategy`).
+
+
+5.  **Return Strategy Object:**
+    *   If validation succeeds, create and return the `AnalysisStrategy` object using the LLM's output.
+
+
+**Goal:** Implement logic to monitor workflow progress and dynamically modify the strategy based on concrete findings (`_check_adaptation_criteria`, `_adapt_strategy`).
+
+
+**Recommended Approach:** Programmatic Triggers + Hybrid (Rules/LLM) Adaptation
+
+
+**Implementation Steps:**
+
+
+1.  **Implement Trigger Checks (`_check_adaptation_criteria`):**
+    *   **Action:** Replace the current mock logic with specific, programmatic checks.
+    *   **Details:**
+        *   Get the result of the last executed step: `last_result = context.results[strategy.steps[current_step_idx]['technique']]`.
+        *   Check for specific conditions within `last_result` based on the technique type. Define thresholds where appropriate.
+        *   **Examples:**
+            *   `if last_result.get('technique') == 'UncertaintyMappingTechnique' and last_result.get('overall_uncertainty', 'Medium') == 'High': return 'HighUncertaintyDetected'`
+            *   `if last_result.get('technique') == 'BiasDetectionTechnique' and last_result.get('overall_bias_level', 'Low') == 'High': return 'HighBiasDetected'`
+            *   `if last_result.get('technique') == 'ACHTechnique': scores = last_result.get('inconsistency_scores', []); if len(scores) > 1 and (scores[1]['score'] - scores[0]['score']) < 1.5: return 'ConflictingHypotheses'`
+            *   `if last_result.get('technique') == 'SynthesisGenerationTechnique' and len(last_result.get('contradictions', [])) > 0: return 'ContradictionsFound'`
+            *   `if last_result.get('status') == 'failed': return 'TechniqueFailure'`
+        *   Return a specific trigger type (string/enum) if a condition is met, otherwise return `None`.
+
+
+2.  **Implement Adaptation Actions (`_adapt_strategy`):**
+    *   **Action:** Replace the current mock logic with a hybrid rule-based and LLM approach based on the `trigger_type`.
+    *   **Details:**
+        *   **Rule-Based Handling (for common triggers):**
+            *   `if trigger_type == 'HighBiasDetected':` Check if `RedTeamingTechnique` is available and not already planned soon; if so, `strategy.insert_step(current_step_idx + 1, create_step_dict('RedTeamingTechnique', purpose='Address detected bias'))`.
+            *   `if trigger_type == 'ConflictingHypotheses':` Check if `ACHTechnique` or `ArgumentMappingTechnique` is available/appropriate; if so, insert it.
+            *   `if trigger_type == 'HighUncertaintyDetected':` Check if `KeyAssumptionsCheckTechnique` or a deeper dive with `UncertaintyMappingTechnique` is appropriate; insert it or modify parameters of subsequent steps (e.g., increase `num_scenarios`).
+            *   `if trigger_type == 'TechniqueFailure':` Log error, potentially try a defined fallback technique if available, or mark workflow as partially complete.
+        *   **LLM-Based Handling (for complex/unhandled triggers):**
+            *   `else:` (If no specific rule matches the `trigger_type` or if more nuanced adaptation is desired)
+                *   Construct a prompt for the LLM.
+                *   **Prompt Inputs:** `trigger_type`, summary of `last_result`, the remaining planned `strategy.steps`, list of available techniques.
+                *   **Prompt Instructions:** "Given the trigger [trigger_type] and the last result, suggest modifications to the remaining workflow steps ([remaining steps]). You can insert techniques, replace techniques, or modify parameters. Output the *complete new sequence* of remaining steps as a JSON list."
+                *   Parse and validate the LLM's suggested step list.
+                *   Replace the remaining steps in the `strategy` object: `strategy.replace_steps(current_step_idx + 1, new_steps_from_llm)`.
+        *   Log the adaptation action and the reason.
+
+
+**Why this is Important (Principle 1):**
+
+
+*   **Relevance & Depth:** Ensures the analysis directly addresses the question's specific needs and adapts to uncover deeper insights or resolve issues found during execution.
+*   **Efficiency:** Avoids running unnecessary or inappropriate techniques.
+*   **Robustness:** Allows the system to react to problems like high uncertainty, bias, or conflicting evidence by deploying corrective analytical techniques.
+*   **Intelligence:** Moves the system beyond a static script towards a more cognitive process that reflects on its progress.
+
+
+**Difficulty (Principle 1):**
+
+
+*   Implementing this dynamic logic is **Hard**. It's the most complex part of the system.
+*   Requires careful design of the interaction between the orchestrator, context, strategy, and techniques.
+*   Significant effort in prompt engineering for both strategy generation and adaptation LLM calls.
+*   Robust parsing and validation of LLM outputs are critical and non-trivial.
+*   Defining effective, non-brittle trigger conditions (`_check_adaptation_criteria`) requires careful thought and potentially iteration based on observing system behavior.
+*   Balancing rule-based vs. LLM-based adaptation requires careful design trade-offs.
+
+
+---
+
+
+## Principle 2: Ground Analysis in Verifiable Evidence
+
+
+**Goal:** Ensure analysis relies on real data, not just LLM knowledge.
+
+
+**Focus Areas:** Domain MCPs (`EconomicsMCP`, `GeopoliticsMCP`, etc.) and Techniques using research data (`ACHTechnique`, `HypothesisTesting`, etc.).
+
+
+**Implementation Steps:**
+
+
+1.  **Domain MCP Data Integration:**
+    *   **Action:** Modify Domain MCPs to connect to and use real data sources.
+    *   **Details:**
+        *   Identify relevant, reliable APIs/data sources for each domain (e.g., FRED, World Bank Data API, GDELT, financial data providers).
+        *   Implement robust API client logic within each MCP (using `requests` or SDKs), handling authentication (via config), rate limits, pagination, and errors.
+        *   Modify MCP methods (e.g., `EconomicsMCP.analyze_economic_trends`) to first determine *which* specific data is needed based on the `question`/`context`, then fetch *only that data* from the API.
+        *   **Crucially,** inject the *fetched data* (or a concise summary) directly into the LLM prompt for that method. Instruct the LLM to base its analysis *on the provided data*. Example: "Based on the following recent GDP data [fetched data], analyze the economic trend..."
+        *   Implement caching for API responses (similar to `ResearchMCP`) to reduce costs/latency.
+    *   **Why:** Prevents analysis detached from reality, reduces factual errors/hallucinations, ensures assessments reflect the current state of the world, increases trustworthiness.
+    *   **Difficulty:** **Medium to Hard.** Requires identifying sources, implementing API clients, significant prompt engineering, and config management.
+
+
+2.  **Techniques Using Research Data:**
+    *   **Action:** Ensure techniques explicitly use data fetched by `ResearchMCP`.
+    *   **Details:**
+        *   Techniques like `ACHTechnique`, `HypothesisTesting` must access research results stored in `AnalysisContext` (e.g., `context.results['research_mcp']`).
+        *   Extract concise, relevant snippets/summaries from the fetched research content.
+        *   Pass these specific evidence snippets into the technique's LLM prompts, instructing the LLM explicitly to evaluate hypotheses *against the provided evidence*. Example: "Evaluate Hypothesis A against the following evidence snippets: [Snippet 1 from Source X], [Snippet 2 from Source Y]..."
+        *   Maintain provenance: Link technique outputs back to the specific evidence snippets and original sources used.
+    *   **Why:** Grounds analytical steps (like hypothesis evaluation) in externally retrieved information, enhancing objectivity.
+    *   **Difficulty:** **Medium.** Requires careful context passing and prompt engineering.
+
+
+---
+
+
+## Principle 3: Quantify and Communicate Uncertainty Explicitly
+
+
+**Goal:** Make uncertainty a core, transparent output of the analysis.
+
+
+**Focus Areas:** `UncertaintyMappingTechnique`, `SynthesisGenerationTechnique`.
+
+
+**Implementation Steps:**
+
+
+1.  **Enhance `UncertaintyMappingTechnique`:**
+    *   **Action:** Refine the technique's logic for identifying and assessing uncertainty.
+    *   **Details:**
+        *   Improve LLM prompts (`_identify_uncertainties`, `_categorize_uncertainties`, `_assess_uncertainties`) to explicitly look for hedging language, conflicting data, known unknowns, and model limitations in the input analysis content.
+        *   Ensure assessment output includes detailed rationale for impact/reducibility ratings, and potentially quantitative estimates (ranges) where feasible.
+        *   Link identified uncertainties back to their source (specific technique result or evidence).
+        *   Refine or simplify uncertainty categorization (Epistemic, Aleatory etc.) based on reliability.
+    *   **Why:** Ensures a more rigorous and comprehensive identification and assessment of different types of uncertainty present in the analysis.
+    *   **Difficulty:** **Medium.** Primarily involves prompt engineering and potentially refining the expected output structure.
+
+
+2.  **Integrate Uncertainty into `SynthesisGenerationTechnique`:**
+    *   **Action:** Modify synthesis prompts to explicitly use uncertainty findings.
+    *   **Details:**
+        *   Pass the output of `UncertaintyMappingTechnique` (from `context.results`) as input to `_generate_integrated_synthesis` and `_generate_final_assessment`.
+        *   Update prompts to instruct the LLM to:
+            *   List the most critical uncertainties identified.
+            *   Justify the final `confidence_level` *based on* these uncertainties.
+            *   Discuss how conclusions might change under different uncertainty resolutions.
+            *   Use cautious language where high uncertainty exists.
+        *   Ensure the final synthesis JSON output has dedicated fields like `critical_uncertainties` and `confidence_justification`.
+    *   **Why:** Prevents false certainty; makes the final assessment realistically reflect the analysis limitations; improves decision-making utility.
+    *   **Difficulty:** **Medium.** Requires modifying data flow between techniques and careful prompt engineering for the synthesis steps.
+
+
+---
+
+
+## Principle 4: Actively Challenge Assumptions and Biases
+
+
+**Goal:** Implement robust challenge mechanisms and structural debiasing.
+
+
+**Focus Areas:** Challenge Techniques (`RedTeamingTechnique`, `ConsensusChallengeTechnique`), `AnalysisContext`, `BiasDetectionTechnique`, `KeyAssumptionsCheckTechnique`.
+
+
+**Implementation Steps:**
+
+
+1.  **Strengthen Challenge Techniques:**
+    *   **Action:** Refine prompts for `RedTeamingTechnique` and `ConsensusChallengeTechnique`.
+    *   **Details:**
+        *   Demand *specific, evidence-based* counter-arguments. Prompt Example: "Identify the weakest assumption in this argument and provide 2 specific reasons, citing potential conflicting evidence or alternative interpretations, why it might be wrong."
+        *   Use specific adversarial personas for `RedTeamingTechnique` prompts (e.g., competitor, skeptic).
+        *   Consider adding an LLM step to score the *validity* or *impact* of generated challenges, filtering weak ones.
+        *   Add simple programmatic checks where possible (e.g., does a challenge contradict a stated consensus?).
+    *   **Why:** Ensures challenges are rigorous and meaningful, effectively testing the core analysis rather than generating superficial disagreement.
+    *   **Difficulty:** **Medium to Hard.** Requires careful prompt engineering and potentially adding scoring/filtering logic.
+
+
+2.  **Implement Structural Debiasing:**
+    *   **Action:** Add explicit assumption tracking and enhance techniques like `MultiPersonaTechnique`.
+    *   **Details:**
+        *   **Assumption Tracking:** Modify `AnalysisContext` to add `self.assumptions = []`. Update `KeyAssumptionsCheckTechnique`'s LLM prompt to identify key assumptions and modify its code to log these (with source) to `context.assumptions`. Include `context.assumptions` in prompts for challenge techniques and synthesis, asking for explicit review.
+        *   **Diverse Personas:** Ensure `MultiPersonaTechnique` prompts explicitly request diverse *and critical* viewpoints (optimist, pessimist, domain expert, competitor, regulator, etc.).
+        *   **Argument Mapping:** Ensure `ArgumentMappingTechnique` prompts focus on extracting logical structure (premises, conclusions, warrants, rebuttals).
+        *   **Bias Detection:** Refine `BiasDetectionTechnique` prompts to check against a specific list of common cognitive and LLM biases.
+    *   **Why:** Builds bias mitigation into the structure of the analysis, rather than relying solely on post-hoc detection. Makes hidden assumptions explicit targets for challenge.
+    *   **Difficulty:** **Medium.** Requires modifying context, technique prompts, and potentially technique logic.
+
+
+---
+
+
+## Principle 5: Leverage Specialized Knowledge Appropriately
+
+
+**Goal:** Ensure Domain MCPs provide real expertise grounded in data or specialized models.
+
+
+**Focus Areas:** Domain MCP implementation (`EconomicsMCP`, `GeopoliticsMCP`, new domains).
+
+
+**Implementation Steps:**
+
+
+1.  **Data Integration (Reiteration):**
+    *   **Action:** Integrate real data sources/APIs into *all* Domain MCPs.
+    *   **Details:** As described in Principle 2, identify sources, implement API clients, fetch relevant data, and inject it into LLM prompts. **This is crucial for moving beyond LLM wrappers.**
+    *   **Why:** Provides genuine domain expertise and grounding in facts, essential for world-class analysis.
+    *   **Difficulty:** **Medium to Hard.** (Repeated for emphasis).
+
+
+2.  **Incorporate Domain-Specific Models/Heuristics:**
+    *   **Action:** Where applicable, add non-LLM domain logic.
+    *   **Details:** `EconomicsMCP` could perform calculations (growth rates, ratios) on fetched data. A future `NetworkAnalysisMCP` could use `networkx`. A `ScientificLiteratureMCP` could use NLP techniques to extract specific entities/relationships from papers.
+    *   **Why:** Leverages the strengths of both traditional computation/modeling and LLM reasoning. Can provide more precise or validated results for specific tasks.
+    *   **Difficulty:** **Medium to Hard.** Requires domain expertise and potentially integrating other libraries/models.
+
+
+3.  **Specialized LLM Prompting:**
+    *   **Action:** Tailor prompts within Domain MCPs.
+    *   **Details:** Use domain-specific terminology. Instruct the LLM to apply relevant frameworks (e.g., Porter's Five Forces in `EconomicsMCP`, specific IR theories in `GeopoliticsMCP`).
+    *   **Why:** Guides the LLM to reason like an expert in that specific field.
+    *   **Difficulty:** **Medium.** Requires domain knowledge to craft effective prompts.
+
+
+4.  **Implement New Domain MCPs:**
+    *   **Action:** Create new MCP classes for priority domains (e.g., Technology, Social Science).
+    *   **Details:** Follow the data integration principle (#1) from the start for these new MCPs.
+    *   **Why:** Expands the system's analytical reach and depth into critical areas.
+    *   **Difficulty:** **Hard.** Requires significant effort per domain (identifying sources, implementing clients, designing logic/prompts).
+
+
+---
+
+
+## Principle 6: Provide Transparent and Traceable Reasoning
+
+
+**Goal:** Make the analytical process understandable and trustworthy.
+
+
+**Focus Areas:** Logging, `AnalysisContext`, `SynthesisGenerationTechnique`.
+
+
+**Implementation Steps:**
+
+
+1.  **Log Workflow Decisions:**
+    *   **Action:** Enhance logging in `WorkflowOrchestratorMCP`.
+    *   **Details:** Within `_generate_analysis_strategy` and `_adapt_strategy`, explicitly log the *reasoning* behind key decisions (e.g., "Selected [Technique] because question type is predictive and complexity is high", "Inserted [Technique] due to HighBiasDetected trigger"). Store these decision points with timestamps in `context.events`.
+    *   **Why:** Creates an audit trail explaining *why* the workflow took a specific path.
+    *   **Difficulty:** **Medium.** Requires adding logging statements at key decision points.
+
+
+2.  **Structure Context and Results:**
+    *   **Action:** Ensure consistent structure and consider adding input tracking.
+    *   **Details:** Use consistent keys in `context.results`. Consider adding an `inputs_used` field within each technique's result dictionary, listing the key data points or results from other techniques/MCPs it relied upon.
+    *   **Why:** Makes the flow of information between steps clearer.
+    *   **Difficulty:** **Medium.** Requires modifying the return structure of techniques.
+
+
+3.  **Implement Synthesis Referencing:**
+    *   **Action:** Modify prompts for `SynthesisGenerationTechnique`.
+    *   **Details:** Explicitly instruct the LLM in `_generate_integrated_synthesis` and `_generate_final_assessment` to *cite* the source technique or evidence for each key judgment (e.g., "Conclusion X [Source: ACH Technique]", "Finding Y [Source: ResearchMCP, Source URL Z]").
+    *   **Why:** Directly links final conclusions back to the analytical steps and evidence that support them.
+    *   **Difficulty:** **Medium.** Requires careful prompt engineering; LLM might struggle with consistent citation.
+
+
+4.  **Enhance Final Output:**
+    *   **Action:** Modify the final output generation (likely in `app.py` or `MCPSystemIntegrator`).
+    *   **Details:** Include not just the final synthesis but also a summary of the executed workflow path (list of techniques run, adaptations made with reasons logged in #1) and potentially links to key evidence sources identified during research/synthesis.
+    *   **Why:** Provides the user with full context on how the assessment was produced.
+    *   **Difficulty:** **Medium.** Requires accessing and formatting information logged in `AnalysisContext`.

@@ -15,6 +15,42 @@ from utils.llm_integration import call_llm, extract_content, parse_json_response
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+    
+    def visualize_tree(self, tree_data):
+        """
+        Generates a text-based visualization of the decision tree.
+        Args:
+            tree_data (Dict[str, Any]): The decision tree data in JSON format.
+        """
+        def print_node(node, indent=0):
+            node_type = node.get("type", "unknown")
+            label = node.get("label", "Node")
+            if node_type == "decision":
+                print("  " * indent + f"Decision: {label}")
+                for option in node.get("options", []):
+                    print("  " * (indent + 1) + f"Option: {option['label']}")
+                    if "node" in option:
+                        print_node(option["node"], indent + 2)
+            elif node_type == "chance":
+                print("  " * indent + f"Chance: {label}")
+                for outcome in node.get("probabilities", []):
+                    print("  " * (indent + 1) + f"Outcome: {outcome['label']} (Probability: {outcome['probability']})")
+                    if "node" in outcome:
+                        print_node(outcome["node"], indent + 2)
+            elif node_type == "outcome":
+                print("  " * indent + f"Outcome: {label} (Value: {node.get('value', 'N/A')})")
+            else:
+                print("  " * indent + f"Unknown Node Type: {label}")
+        if "tree" in tree_data and "root" in tree_data["tree"]:
+            print_node(tree_data["tree"]["root"])
+        else:
+            print("Invalid tree data format for visualization.")
+
+
+
+
+
+
 class DecisionTreeAnalysisTechnique(AnalyticalTechnique):
     """
     Structures complex decisions into a tree of options and outcomes.
@@ -35,6 +71,94 @@ class DecisionTreeAnalysisTechnique(AnalyticalTechnique):
         Returns:
             Dictionary containing decision tree analysis results
         """
+        try:
+            # Extract necessary information from context and parameters
+            decision_problem = context.get("decision_problem")
+            if not decision_problem:
+                raise ValueError("Decision problem not found in context")
+            # Set up the prompt for the LLM
+            prompt = f"""
+            Analyze the following decision problem using a decision tree approach:
+            {decision_problem}
+            Create a decision tree that includes:
+            1. Clear decision nodes with options.
+            2. Chance nodes with probabilities for different outcomes.
+            3. Outcome values or utilities for each final outcome.
+            Provide the decision tree in a JSON format that can be easily parsed and visualized.
+            The JSON should have the following structure:
+            {{
+                "decision_problem": "...",
+                "tree": {{
+                    "root": {{
+                        "type": "decision",
+                        "label": "Decision 1",
+                        "options": [
+                            {{
+                                "label": "Option A",
+                                "node": {{
+                                    "type": "chance",
+                                    "label": "Outcome of Option A",
+                                    "probabilities": [
+                                        {{
+                                            "label": "Outcome A1",
+                                            "probability": 0.6,
+                                            "node": {{
+                                                "type": "outcome",
+                                                "label": "Outcome A1 Result",
+                                                "value": 100
+                                            }}
+                                        }},
+                                        {{
+                                            "label": "Outcome A2",
+                                            "probability": 0.4,
+                                            "node": {{
+                                                "type": "outcome",
+                                                "label": "Outcome A2 Result",
+                                                "value": 20
+                                            }}
+                                        }}
+                                    ]
+                                }}
+                            }},
+                            {{
+                                "label": "Option B",
+                                "node": {{
+                                    "type": "outcome",
+                                    "label": "Outcome of Option B",
+                                    "value": 50
+                                }}
+                            }}
+                        ]
+                    }}
+                }}
+            }}
+            """
+            # Call the LLM to generate the decision tree
+            start_time = time.time()
+            llm_response = call_llm(prompt, model_config=MODEL_CONFIG)
+            end_time = time.time()
+            # Extract and parse the decision tree from the LLM response
+            tree_json = extract_content(llm_response)
+            if not tree_json:
+                raise ValueError("No decision tree found in LLM response")
+            decision_tree = json.loads(tree_json)
+            # Basic validation of the parsed JSON (can be expanded)
+            if "decision_problem" not in decision_tree or "tree" not in decision_tree:
+                raise ValueError("Invalid decision tree JSON format")
+            # Log the execution time and other relevant information
+            self.visualize_tree(decision_tree)
+            self.visualize_tree(decision_tree)
+            logger.info(f"Decision tree analysis completed in {end_time - start_time:.4f} seconds")
+            logger.debug(f"Decision tree: {json.dumps(decision_tree, indent=2)}")
+            return {
+                "decision_tree_analysis": decision_tree,
+                "execution_time": end_time - start_time
+        except Exception as e:
+            logger.error(f"Error during decision tree analysis: {e}", exc_info=True)
+            return {
+                "error": str(e)
+            }
+
         logger.info(f"Executing DecisionTreeAnalysisTechnique for question: {context.question[:50]}...")
         
         # Get parameters or use defaults
@@ -118,24 +242,39 @@ class DecisionTreeAnalysisTechnique(AnalyticalTechnique):
                 # Fall through to LLM-based identification
         
         # Use LLM to identify key decision
-        prompt = f"""
-        Identify the key decision implied by the following analytical question:
-        
+        prompt = f"""        
+        You are an expert analyst. Your task is to identify the key decision implied by the following analytical question:
+
         "{context.question}"
-        
-        For this analysis:
-        1. Identify the central decision that needs to be made
-        2. Determine who the primary decision maker is
-        3. Specify the timeframe for the decision
-        4. Provide relevant context for the decision
-        
-        Return your response as a JSON object with the following structure:
+
+        Your analysis should be comprehensive and structured. Consider the following aspects:
+
+        1.  **Decision:** Identify the central decision that needs to be made. Frame the decision as a clear choice between distinct options or courses of action.
+        2.  **Decision Maker:** Determine who the primary decision maker is or which entity is responsible for making this decision.
+        3.  **Timeframe:** Specify the timeframe within which this decision needs to be made (e.g., immediately, short-term, mid-term, long-term).
+        4.  **Context:** Provide relevant context that informs or influences this decision. What are the background or surrounding circumstances that are important to understand the decision?
+
+        Ensure that your response is in the format of a single JSON object. Here's an example of what I am looking for:
+
         {{
-            "decision": "Clear statement of the decision to be made (framed as a choice between options)",
-            "decision_maker": "Who needs to make this decision",
-            "timeframe": "When this decision needs to be made",
-            "context": "Relevant context for this decision"
+            "decision": "Whether to expand into the European market or consolidate in North America",
+            "decision_maker": "Senior management team",
+            "timeframe": "Short-term (within the next year)",
+            "context": "The company has seen strong growth in North America but faces increasing competition. Expanding into Europe could unlock new growth potential but carries higher risks."
         }}
+
+        Here are the required fields:
+        -   **decision:** A clear, concise statement of the decision to be made. This should be framed as a choice between options.
+        -   **decision_maker:** Identifies who or which group needs to make the decision.
+        -   **timeframe:** Specifies when the decision needs to be made.
+        -   **context:** Provides the background or relevant circumstances affecting the decision.
+
+        Remember:
+        - Your output must be a single, valid JSON object.
+        - Be as specific as possible, based on the information given in the question.
+        - Use the provided example structure.
+        - Do not return any text outside of the JSON output.
+
         """
         
         model_config = MODEL_CONFIG["sonar"]

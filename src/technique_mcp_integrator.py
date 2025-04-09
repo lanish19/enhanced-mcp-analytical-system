@@ -54,6 +54,9 @@ class TechniqueMCPIntegrator:
         """
         # Define which MCPs each technique requires
         mappings = {
+            
+             # Economic techniques
+            "economic_forecasting" : ["economics"],
             # Research-intensive techniques
             "research_to_hypothesis": ["research", "llama4_scout"],
             "scenario_triangulation": ["research", "llama4_scout", "redis_context_store"],
@@ -102,6 +105,7 @@ class TechniqueMCPIntegrator:
         """
         # Define which techniques depend on other techniques
         dependencies = {
+            "economic_forecasting" : [],
             "scenario_triangulation": [],
             "consensus_challenge": [],
             "multi_persona": [],
