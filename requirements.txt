@@ -1,0 +1,41 @@
+"""
+Requirements file for the MCP-based analytical system.
+Lists all dependencies needed to run the system.
+"""
+
+# Core dependencies
+streamlit==1.32.0
+redis==5.0.1
+requests==2.31.0
+python-dotenv==1.0.0
+
+# LLM integration
+groq==0.4.0
+perplexity==0.2.0
+
+# Data processing
+pandas==2.1.1
+numpy==1.26.0
+matplotlib==3.8.0
+plotly==5.18.0
+
+# Web utilities
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# NLP utilities
+nltk==3.8.1
+spacy==3.7.2
+transformers==4.36.2
+
+# Visualization
+networkx==3.2.1
+pydot==1.4.2
+graphviz==0.20.1
+
+# Testing
+pytest==7.4.3
+pytest-mock==3.12.0
+
+# Deployment
+gunicorn==21.2.0
